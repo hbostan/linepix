@@ -30,7 +30,7 @@ func main() {
 	rand.Seed(time.Now().Unix())
 
 	var input, output string
-	var lineCount, precision, lineWeight, fps int
+	var lineCount, precision, lineWeight, fps, freeze int
 	var width, height uint
 	var color, video bool
 	// Defaults
@@ -42,6 +42,7 @@ func main() {
 	color = false
 	video = false
 	fps = 3000
+	freeze = 5
 
 	helpFlag := getopt.BoolLong("help", 0, "Display help.")
 	getopt.FlagLong(&input, "input", 'i', "Name of the input image").Mandatory()
@@ -52,11 +53,13 @@ func main() {
 	getopt.FlagLong(&height, "height", 'h', "Height of the output image.")
 	getopt.FlagLong(&color, "color", 'c', "Generate color image.")
 	getopt.FlagLong(&fps, "fps", 'f', "FPS value for the generated video. Each frame adds a single line.")
+	getopt.FlagLong(&freeze, "freeze", 's', "Time to freeze the last frame of the video.")
 	getopt.FlagLong(&video, "video", 'v', "Generate video of the process.")
 	getopt.ParseV2()
 
 	if *helpFlag {
 		getopt.PrintUsage(os.Stdout)
+		os.Exit(0)
 	}
 	if strings.HasSuffix(output, ".png") {
 		output = output[:len(output)-4]
@@ -74,7 +77,7 @@ func main() {
 	var ffmpegStdin io.WriteCloser
 	if video {
 		var err error
-		ffmpeg, ffmpegStdin, err = linepix.SetupFFMPEG(output+".mp4", inpImage.Bounds().Dx(), inpImage.Bounds().Dy(), fps)
+		ffmpeg, ffmpegStdin, err = linepix.SetupFFMPEG(output+".mp4", inpImage.Bounds().Dx(), inpImage.Bounds().Dy(), fps, freeze)
 		if err != nil {
 			log.Println("Failed running FFMPEG. Not generating video.")
 			video = false
@@ -132,19 +135,12 @@ func main() {
 		elapsed := time.Since(start)
 		estimated := start.Add(time.Duration(float64(elapsed) / percent))
 		eta := estimated.Sub(time.Now())
-		l := fmt.Sprintf("%6v/%6v           %15v", i, lineCount, eta.Truncate(time.Second))
+		l := fmt.Sprintf("%6v/%6v Gen Lines %15v", i, lineCount, eta.Truncate(time.Second))
 		coloredBackground(l, percent)
 	}
-
 	if video && ffmpeg != nil {
-		// Freeze last frame for 3 seconds
-		log.Println("❄ Freezing last frame")
-		for i := 0; i < fps*3; i++ {
-			ffmpegStdin.Write(outImage.Pix)
-		}
 		ffmpegStdin.Close()
 	}
-
 	fmt.Println()
 	linepix.SaveImage(output+".png", outImage)
 	fmt.Printf("✅ Done! ✅ (Took %v)\n", time.Since(start).Truncate(time.Millisecond))

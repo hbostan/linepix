@@ -332,7 +332,7 @@ func CalculateChannelRatios(redLum, greenLum, blueLum uint64, length int) (float
 	return rLineRatio, gLineRatio, bLineRatio
 }
 
-func SetupFFMPEG(output string, width, height, fps int) (*exec.Cmd, io.WriteCloser, error) {
+func SetupFFMPEG(output string, width, height, fps, freeze int) (*exec.Cmd, io.WriteCloser, error) {
 	exists := exec.Command("ffmpeg", "-version")
 	if err := exists.Run(); err != nil {
 		return nil, nil, err
@@ -343,9 +343,11 @@ func SetupFFMPEG(output string, width, height, fps int) (*exec.Cmd, io.WriteClos
 		"-s", fmt.Sprintf("%vx%v", width, height),
 		"-r", fmt.Sprintf("%v", fps),
 		"-i", "-",
+		"-vf", fmt.Sprintf("tpad=stop_mode=clone:stop_duration=%v", freeze),
+		"-r", "30",
 		"-c:v", "libx264",
-		"-crf", "18",
-		"-preset", "veryslow",
+		"-crf", "30",
+
 		// "-pix_fmt", "yuv420p",
 		output)
 	stdin, err := cmd.StdinPipe()
