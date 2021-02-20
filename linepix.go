@@ -1,13 +1,16 @@
 package linepix
 
 import (
+	"fmt"
 	"image"
 	_ "image/jpeg"
 	"image/png"
 	_ "image/png"
+	"io"
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 
 	"github.com/nfnt/resize"
 )
@@ -327,4 +330,27 @@ func CalculateChannelRatios(redLum, greenLum, blueLum uint64, length int) (float
 		bLineRatio = float64(1.0)
 	}
 	return rLineRatio, gLineRatio, bLineRatio
+}
+
+func SetupFFMPEG(output string, width, height, fps int) (*exec.Cmd, io.WriteCloser, error) {
+	exists := exec.Command("ffmpeg", "-version")
+	if err := exists.Run(); err != nil {
+		return nil, nil, err
+	}
+	cmd := exec.Command("ffmpeg", "-y",
+		"-f", "rawvideo",
+		"-pix_fmt", "rgba",
+		"-s", fmt.Sprintf("%vx%v", width, height),
+		"-r", fmt.Sprintf("%v", fps),
+		"-i", "-",
+		"-c:v", "libx264",
+		"-crf", "18",
+		"-preset", "veryslow",
+		// "-pix_fmt", "yuv420p",
+		output)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		log.Fatalln("Can't pipe ffmpeg stdin", err)
+	}
+	return cmd, stdin, nil
 }

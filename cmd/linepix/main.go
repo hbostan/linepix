@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"math"
+	"math/rand"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -24,10 +27,12 @@ func coloredBackground(o string, percent float64) {
 }
 
 func main() {
+	rand.Seed(time.Now().Unix())
+
 	var input, output string
-	var lineCount, precision, lineWeight int
+	var lineCount, precision, lineWeight, fps int
 	var width, height uint
-	var color bool
+	var color, video bool
 	// Defaults
 	lineCount = 2500
 	precision = 60
@@ -35,6 +40,8 @@ func main() {
 	width = 512
 	height = 0
 	color = false
+	video = false
+	fps = 3000
 
 	helpFlag := getopt.BoolLong("help", 0, "Display help.")
 	getopt.FlagLong(&input, "input", 'i', "Name of the input image").Mandatory()
@@ -43,7 +50,9 @@ func main() {
 	getopt.FlagLong(&precision, "precision", 'p', "Number of tests performed to find the darkest line.")
 	getopt.FlagLong(&width, "width", 'w', "Width of the output image.")
 	getopt.FlagLong(&height, "height", 'h', "Height of the output image.")
-	getopt.FlagLong(&color, "color", 'c', "Generate color image")
+	getopt.FlagLong(&color, "color", 'c', "Generate color image.")
+	getopt.FlagLong(&fps, "fps", 'f', "FPS value for the generated video. Each frame adds a single line.")
+	getopt.FlagLong(&video, "video", 'v', "Generate video of the process.")
 	getopt.ParseV2()
 
 	if *helpFlag {
@@ -53,7 +62,7 @@ func main() {
 		output = output[:len(output)-4]
 	}
 
-	linech := make(chan linepix.Line)
+	linech := make(chan linepix.Line, lineCount)
 
 	inpImage := linepix.ReadImage(input)
 	// Don't resize if width & height are both 0
@@ -61,13 +70,23 @@ func main() {
 		inpImage = linepix.ResizeImage(inpImage, width, height)
 		log.Printf("📏 Image Resized (%vx%v)\n", inpImage.Bounds().Dx(), inpImage.Bounds().Dy())
 	}
+	var ffmpeg *exec.Cmd
+	var ffmpegStdin io.WriteCloser
+	if video {
+		var err error
+		ffmpeg, ffmpegStdin, err = linepix.SetupFFMPEG(output+".mp4", inpImage.Bounds().Dx(), inpImage.Bounds().Dy(), fps)
+		if err != nil {
+			log.Println("Failed running FFMPEG. Not generating video.")
+			video = false
+		}
+	}
 
 	if color {
 		log.Println("🌈 Processing color image.")
 		rgba := linepix.MakeRGBA(inpImage)
-		fmt.Println("🌀  Converted to RGBA")
+		log.Println("🌀  Converted to RGBA")
 		red, green, blue := linepix.SplitImage(rgba)
-		fmt.Println("🪓 Splitted color channels")
+		log.Println("🪓 Splitted color channels")
 		redLum := linepix.TotalLuminosity(red)
 		greenLum := linepix.TotalLuminosity(green)
 		blueLum := linepix.TotalLuminosity(blue)
@@ -76,7 +95,7 @@ func main() {
 		gLineCount := int(float64(lineCount) * gr)
 		bLineCount := int(float64(lineCount) * br)
 		lineCount = rLineCount + gLineCount + bLineCount
-		fmt.Println("🧮 Calculated number of lines to draw for each channel")
+		log.Println("🧮 Calculated number of lines to draw for each channel")
 		go linepix.GenerateLines(red, rLineCount, precision, lineWeight, linepix.RedChannel, linech)
 		go linepix.GenerateLines(green, gLineCount, precision, lineWeight, linepix.GreenChannel, linech)
 		go linepix.GenerateLines(blue, bLineCount, precision, lineWeight, linepix.BlueChannel, linech)
@@ -89,6 +108,15 @@ func main() {
 	for i := 0; i < len(outImage.Pix); i++ {
 		outImage.Pix[i] = 0xff
 	}
+	if video && ffmpeg != nil {
+		err := ffmpeg.Start()
+		if err != nil {
+			log.Println("Cannot start FFMPEG. Not generating video.")
+			video = false
+		} else {
+			log.Println("🎥 Started ffmpeg.")
+		}
+	}
 
 	log.Println("🧙‍♂️ Working my magic!✨")
 
@@ -97,13 +125,24 @@ func main() {
 		var line linepix.Line
 		line = <-linech
 		linepix.DrawLine(outImage, line, true)
-
+		if video && ffmpeg != nil {
+			ffmpegStdin.Write(outImage.Pix)
+		}
 		percent := float64(i) / float64(lineCount)
 		elapsed := time.Since(start)
 		estimated := start.Add(time.Duration(float64(elapsed) / percent))
 		eta := estimated.Sub(time.Now())
 		l := fmt.Sprintf("%6v/%6v           %15v", i, lineCount, eta.Truncate(time.Second))
 		coloredBackground(l, percent)
+	}
+
+	if video && ffmpeg != nil {
+		// Freeze last frame for 3 seconds
+		log.Println("❄ Freezing last frame")
+		for i := 0; i < fps*3; i++ {
+			ffmpegStdin.Write(outImage.Pix)
+		}
+		ffmpegStdin.Close()
 	}
 
 	fmt.Println()
