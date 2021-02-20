@@ -63,4 +63,4 @@ Linepix, first finds the darkest pixel in the image. Then it generates lines tha
 
 ## License
 
-The MIT License (MIT) - see [`LICENSE.md`](https://github.com/hbostann/linepix/blob/main/LICENSE.md) for more details
+The MIT License (MIT) - see [`LICENSE`](https://github.com/hbostann/linepix/blob/main/LICENSE.md) for more details
