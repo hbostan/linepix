@@ -12,9 +12,19 @@ import (
 	"github.com/nfnt/resize"
 )
 
+type ColorChannel int
+
+const (
+	RedChannel ColorChannel = iota
+	GreenChannel
+	BlueChannel
+	AllChannels
+)
+
 type Line struct {
-	Points []image.Point
-	Weight int
+	Points  []image.Point
+	Weight  int
+	Channel ColorChannel
 }
 
 func min(a, b int) int {
@@ -189,12 +199,35 @@ func findEdgeIntersections(bounds image.Rectangle, p image.Point, slope float64)
 	return start, end
 }
 
-func DrawLine(img image.Image, line Line) {
-	grayImg := img.(*image.Gray)
-	for _, point := range line.Points {
-		pixOffset := grayImg.PixOffset(point.X, point.Y)
-		gray := int(grayImg.Pix[pixOffset])
-		grayImg.Pix[pixOffset] = clamp(gray-line.Weight, 0, 0xff)
+func DrawLine(img image.Image, line Line, color bool) {
+	if color {
+		rgbaImg := img.(*image.RGBA)
+		for _, point := range line.Points {
+			pixOffset := rgbaImg.PixOffset(point.X, point.Y)
+			r := int(rgbaImg.Pix[pixOffset+0])
+			g := int(rgbaImg.Pix[pixOffset+1])
+			b := int(rgbaImg.Pix[pixOffset+2])
+			switch line.Channel {
+			case 0: //Red
+				rgbaImg.Pix[pixOffset+0] = clamp(r-line.Weight, 0, 0xff)
+			case 1: //Green
+				rgbaImg.Pix[pixOffset+1] = clamp(g-line.Weight, 0, 0xff)
+			case 2: //Blue
+				rgbaImg.Pix[pixOffset+2] = clamp(b-line.Weight, 0, 0xff)
+			default:
+				rgbaImg.Pix[pixOffset+0] = clamp(r-line.Weight, 0, 0xff)
+				rgbaImg.Pix[pixOffset+1] = clamp(g-line.Weight, 0, 0xff)
+				rgbaImg.Pix[pixOffset+2] = clamp(b-line.Weight, 0, 0xff)
+			}
+			rgbaImg.Pix[pixOffset+3] = 0xff
+		}
+	} else {
+		grayImg := img.(*image.Gray)
+		for _, point := range line.Points {
+			pixOffset := grayImg.PixOffset(point.X, point.Y)
+			gray := int(grayImg.Pix[pixOffset])
+			grayImg.Pix[pixOffset] = clamp(gray-line.Weight, 0, 0xff)
+		}
 	}
 }
 
@@ -250,17 +283,48 @@ func findDarkestLine(img *image.Gray, p image.Point, numTests int) Line {
 	return line
 }
 
-func GenerateLines(img *image.Gray, lineCount, precision, lineWeight int, out chan Line) {
+func GenerateLines(img *image.Gray, lineCount, precision, lineWeight int, channel ColorChannel, out chan Line) {
 	for i := 0; i < lineCount; i++ {
 		darkestPixels := findDarkestPixels(img)
 		selection := darkestPixels[rand.Intn(len(darkestPixels))]
 		darkestLine := findDarkestLine(img, selection, precision)
 		darkestLine.Weight = lineWeight
+		darkestLine.Channel = channel
 		if out != nil {
 			out <- darkestLine
 		}
 		// Remove line from original image
 		darkestLine.Weight = -lineWeight
-		DrawLine(img, darkestLine)
+		DrawLine(img, darkestLine, false)
 	}
+}
+
+func TotalLuminosity(img *image.Gray) uint64 {
+	var lum uint64
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			lum += uint64(img.Pix[y*img.Stride+x])
+		}
+	}
+	return lum
+}
+
+func CalculateChannelRatios(redLum, greenLum, blueLum uint64, length int) (float64, float64, float64) {
+	redLum = uint64(length*255) - redLum
+	greenLum = uint64(length*255) - greenLum
+	blueLum = uint64(length*255) - blueLum
+	rLineRatio := float64(1.0)
+	gLineRatio := float64(greenLum) / float64(redLum)
+	bLineRatio := float64(blueLum) / float64(redLum)
+	if greenLum > redLum && greenLum > blueLum {
+		rLineRatio = float64(redLum) / float64(greenLum)
+		gLineRatio = float64(1.0)
+		bLineRatio = float64(blueLum) / float64(greenLum)
+	} else if blueLum > redLum && blueLum > greenLum {
+		rLineRatio = float64(redLum) / float64(blueLum)
+		gLineRatio = float64(greenLum) / float64(blueLum)
+		bLineRatio = float64(1.0)
+	}
+	return rLineRatio, gLineRatio, bLineRatio
 }
