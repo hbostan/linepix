@@ -15,7 +15,9 @@ Linepix is written in Go. For image generation it doesn't have any dependencies.
 
 ## Installation
 
-```go get github.com/hbostann/linepix```
+```bash
+go get github.com/hbostann/linepix
+```
 
 ## Examples
 
